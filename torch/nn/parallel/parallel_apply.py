@@ -1,3 +1,4 @@
+import sys
 import threading
 import torch
 from torch.autograd import Variable
@@ -33,8 +34,9 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
 
     lock = threading.Lock()
     results = {}
+    exc_info = {}
 
-    def _worker(i, module, input, kwargs, results, lock, device=None):
+    def _worker(i, module, input, kwargs, results, exc_info, lock, device=None):
         if device is None:
             device = get_a_var(input).get_device()
         try:
@@ -44,11 +46,11 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
                 results[i] = output
         except Exception as e:
             with lock:
-                results[i] = e
+                exc_info[i] = sys.exc_info()
 
     if len(modules) > 1:
         threads = [threading.Thread(target=_worker,
-                                    args=(i, module, input, kwargs, results, lock, device),
+                                    args=(i, module, input, kwargs, results, exc_info, lock, device),
                                     )
                    for i, (module, input, kwargs, device) in
                    enumerate(zip(modules, inputs, kwargs_tup, devices))]
@@ -62,8 +64,9 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
 
     outputs = []
     for i in range(len(inputs)):
+        if i in exc_info:
+            raise exc_info[i][0], exc_info[i][1], exc_info[i][2]
+
         output = results[i]
-        if isinstance(output, Exception):
-            raise output
         outputs.append(output)
     return outputs
